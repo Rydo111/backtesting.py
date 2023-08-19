@@ -1555,7 +1555,7 @@ class Backtest:
     def plot(self, *, results: pd.Series = None, filename=None, plot_width=None,
              plot_equity=True, plot_return=False, plot_pl=True,
              plot_volume=True, plot_drawdown=False, plot_trades=True,
-             smooth_equity=False, relative_equity=True,
+             smooth_equity=False, relative_equity=True, ohlc_height=400,
              superimpose: Union[bool, str] = True,
              resample=True, reverse_indicators=False,
              show_legend=True, open_browser=True):

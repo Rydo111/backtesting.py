@@ -534,12 +534,20 @@ return this.labels[index] || "";
                 fig = new_indicator_figure()
                 indicator_figs.append(fig)
             tooltips = []
+
             colors = value._opts['color']
             colors = colors and cycle(_as_list(colors)) or (
                 cycle([next(ohlc_colors)]) if is_overlay else colorgen())
+
+            line_widths = value._opts['line_width']
+            if line_widths is None:
+                line_widths = [2] * max(len(value._opts['color']), 1)
+            line_widths = cycle(_as_list(line_widths))
+
             legend_label = LegendStr(value.name)
             for j, arr in enumerate(value, 1):
                 color = next(colors)
+                line_width = next(line_widths)
                 source_name = f'{legend_label}_{i}_{j}'
                 if arr.dtype == bool:
                     arr = arr.astype(int)
@@ -557,7 +565,7 @@ return this.labels[index] || "";
                         fig.line(
                             'index', source_name, source=source,
                             legend_label=legend_label, line_color=color,
-                            line_width=1.3)
+                            line_width=line_width)
                 else:
                     if is_scatter:
                         r = fig.scatter(
