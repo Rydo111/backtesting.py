@@ -169,7 +169,7 @@ def plot(*, results: pd.Series,
          plot_volume=True, plot_drawdown=False, plot_trades=True,
          smooth_equity=False, relative_equity=True,
          superimpose=True, resample=True,
-         reverse_indicators=True,
+         reverse_indicators=True, ohlc_height=400,
          show_legend=True, open_browser=True):
     """
     Like much of GUI code everywhere, this is a mess.
@@ -213,7 +213,7 @@ def plot(*, results: pd.Series,
         _figure,
         x_axis_type='linear',
         width=plot_width,
-        height=400,
+        height=ohlc_height,  # default is 400
         tools="xpan,xwheel_zoom,box_zoom,undo,redo,reset,save",
         active_drag='xpan',
         active_scroll='xwheel_zoom')
