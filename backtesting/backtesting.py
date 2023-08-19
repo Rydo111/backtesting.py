@@ -77,7 +77,7 @@ class Strategy(metaclass=ABCMeta):
 
     def I(self,  # noqa: E743
           func: Callable, *args,
-          name=None, plot=True, overlay=None, color=None, scatter=False,
+          name=None, plot=True, overlay=None, color=None, scatter=False, line_width=None,
           **kwargs) -> np.ndarray:
         """
         Declare an indicator. An indicator is just an array of values,
@@ -126,7 +126,7 @@ class Strategy(metaclass=ABCMeta):
         try:
             value = func(*args, **kwargs)
         except Exception as e:
-            raise RuntimeError(f'Indicator "{name}" error') from e
+            raise RuntimeError(f'Indicator "{name}" errored with exception: {e}.') from e
 
         if isinstance(value, pd.DataFrame):
             value = value.values.T
@@ -134,6 +134,7 @@ class Strategy(metaclass=ABCMeta):
         if value is not None:
             value = try_(lambda: np.asarray(value, order='C'), None)
         is_arraylike = bool(value is not None and value.shape)
+        # is_arraylike = value is not None  # ??
 
         # Optionally flip the array if the user returned e.g. `df.values`
         if is_arraylike and np.argmax(value.shape) == 0:
@@ -153,7 +154,7 @@ class Strategy(metaclass=ABCMeta):
                 overlay = ((x < 1.4) & (x > .6)).mean() > .6
 
         value = _Indicator(value, name=name, plot=plot, overlay=overlay,
-                           color=color, scatter=scatter,
+                           color=color, scatter=scatter, line_width=line_width,
                            # _Indicator.s Series accessor uses this:
                            index=self.data.index)
         self._indicators.append(value)
@@ -1315,7 +1316,7 @@ class Backtest:
                               constraint=lambda p: p.sma1 < p.sma2)
 
         .. TODO::
-            Improve multiprocessing/parallel execution on Windos with start method 'spawn'.
+            Improve multiprocessing/parallel execution on Windows with start method 'spawn'.
         """
         if not kwargs:
             raise ValueError('Need some strategy parameters to optimize')
@@ -1554,7 +1555,7 @@ class Backtest:
 
     def plot(self, *, results: pd.Series = None, filename=None, plot_width=None,
              plot_equity=True, plot_return=False, plot_pl=True,
-             plot_volume=True, plot_drawdown=False, plot_trades=True,
+             plot_volume=True, plot_rvol=False, plot_drawdown=False, plot_trades=True,
              smooth_equity=False, relative_equity=True, ohlc_height=400,
              superimpose: Union[bool, str] = True,
              resample=True, reverse_indicators=False,
@@ -1589,6 +1590,11 @@ class Backtest:
 
         If `plot_volume` is `True`, the resulting plot will contain
         a trade volume section.
+
+        If `plot_rvol` is `True`, the resulting plot will contain
+        a relative volume section above the OHLC plot.
+
+        ohlc_height controls the height of the OHLC candle plot figure. Default is 400.
 
         If `plot_drawdown` is `True`, the resulting plot will contain
         a separate drawdown graph section.
@@ -1653,6 +1659,8 @@ class Backtest:
             plot_return=plot_return,
             plot_pl=plot_pl,
             plot_volume=plot_volume,
+            plot_rvol=plot_rvol,
+            ohlc_height=ohlc_height,
             plot_drawdown=plot_drawdown,
             plot_trades=plot_trades,
             smooth_equity=smooth_equity,
