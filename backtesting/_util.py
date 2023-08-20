@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Sequence, Union, cast
 
 import numpy as np
 import pandas as pd
+import polars as pl
 
 
 def try_(lazy_func, default=None, exception=Exception):
@@ -45,6 +46,7 @@ class _Array(np.ndarray):
     ndarray extended to supply .name and other arbitrary properties
     in ._opts dict.
     """
+
     def __new__(cls, array, *, name=None, **kwargs):
         obj = np.asarray(array).view(cls)
         obj.name = name or array.name
@@ -107,6 +109,7 @@ class _Data:
     and the returned "series" are _not_ `pd.Series` but `np.ndarray`
     for performance reasons.
     """
+
     def __init__(self, df: pd.DataFrame):
         self.__df = df
         self.__i = len(df)
@@ -153,8 +156,8 @@ class _Data:
     @property
     def pip(self) -> float:
         if self.__pip is None:
-            self.__pip = float(10**-np.median([len(s.partition('.')[-1])
-                                               for s in self.__arrays['Close'].astype(str)]))
+            self.__pip = float(10 ** -np.median([len(s.partition('.')[-1])
+                                                 for s in self.__arrays['Close'].astype(str)]))
         return self.__pip
 
     def __get_array(self, key) -> _Array:
@@ -193,3 +196,29 @@ class _Data:
 
     def __setstate__(self, state):
         self.__dict__ = state
+
+
+# ---------------------------------
+
+def df_flip_caps(df_in: Union[pl.DataFrame, pd.DataFrame], caps=True):
+    if isinstance(df_in, pd.DataFrame):
+        if caps is True:
+            df = df_in.rename(
+                columns={
+                    "open": "Open",
+                    "close": "Close",
+                    "low": "Low",
+                    "high": "High",
+                    "volume": "Volume"}
+            )
+            df.attrs['columns'] = ['Open', 'High', 'Low', 'Close', 'Volume']
+        else:
+            df = df_in.rename(
+                columns={"Open": "open", "Close": "close", "Low": "low", "High": "high", "Volume": "volume"})
+            df.attrs['columns'] = ['open', 'high', 'low', 'close', 'volume']
+
+    else:
+        if caps is True:
+            df = df_in.rename({"open": "Open"})
+
+    return df

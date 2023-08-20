@@ -37,8 +37,11 @@ from bokeh.io.state import curstate
 from bokeh.layouts import gridplot
 from bokeh.palettes import Category10
 from bokeh.transform import factor_cmap
+from bokeh.models import DataRange1d
 
-from backtesting._util import _data_period, _as_list, _Indicator
+from backtesting._util import _data_period, _as_list, _Indicator, df_flip_caps
+
+from technicals import ta_rel_vol
 
 with open(os.path.join(os.path.dirname(__file__), 'autoscale_cb.js'),
           encoding='utf-8') as _f:
@@ -166,7 +169,7 @@ def plot(*, results: pd.Series,
          indicators: List[_Indicator],
          filename='', plot_width=None,
          plot_equity=True, plot_return=False, plot_pl=True,
-         plot_volume=True, plot_drawdown=False, plot_trades=True,
+         plot_volume=True, plot_rvol=False, plot_drawdown=False, plot_trades=True,
          smooth_equity=False, relative_equity=True,
          superimpose=True, resample=True,
          reverse_indicators=True, ohlc_height=400,
@@ -189,6 +192,7 @@ def plot(*, results: pd.Series,
     trades = results['_trades']
 
     plot_volume = plot_volume and not df.Volume.isnull().all()
+    plot_rvol = plot_rvol and not df.Volume.isnull().all()
     plot_equity = plot_equity and not trades.empty
     plot_return = plot_return and not trades.empty
     plot_pl = plot_pl and not trades.empty
@@ -247,8 +251,8 @@ def plot(*, results: pd.Series,
     if is_datetime_index:
         fig_ohlc.xaxis.formatter = CustomJSTickFormatter(
             args=dict(axis=fig_ohlc.xaxis[0],
-                      formatter=DatetimeTickFormatter(days='%a, %d %b',
-                                                      months='%m/%Y'),
+                      formatter=DatetimeTickFormatter(days='%a, %d %b',  # ['%d %b', '%a %d'
+                                                      months='%m/%Y'),  # ['%m/%Y', "%b'%y"]
                       source=source),
             code='''
 this.labels = this.labels || formatter.doFormat(ticks
@@ -436,6 +440,28 @@ return this.labels[index] || "";
         fig.yaxis.formatter = NumeralTickFormatter(format="0 a")
         return fig
 
+    """
+    I wanted to show a Relative Volume bar chart above the OHLC segment. There's probably better ways to do this, but
+    I chose to calculate rvol here and then use a separate function to manage the rvol plot. I copied from
+    the other types of segment code to arrive at this.
+    """
+    def _plot_rvol_section():
+        """RVOL section"""
+        fig = new_indicator_figure(y_axis_label="RVOL")
+        fig.height = 70
+        fig.xaxis.visible = False
+        temp = df.copy(deep=True)
+        temp = df_flip_caps(df_in=temp, caps=False)
+        kwargs = {'fill_method': 'bfill'}
+        rvol = ta_rel_vol.ta_rvol(close=temp["close"], length=50, **kwargs)
+        rvol = rvol[rvol.columns[0]]
+        fig.y_range = DataRange1d(bounds=(0, max(rvol)))
+        source.add(rvol.values, name='RVOL')
+        r = fig.vbar('index', BAR_WIDTH, 'RVOL', source=source, color=inc_cmap)
+        set_tooltips(fig, [('RVOL', '@RVOL{0.0}')], renderers=[r])
+        fig.yaxis.formatter = NumeralTickFormatter(format="0 a")
+        return fig
+
     def _plot_superimposed_ohlc():
         """Superimposed, downsampled vbars"""
         time_resolution = pd.DatetimeIndex(df['datetime']).resolution
@@ -539,6 +565,7 @@ return this.labels[index] || "";
             colors = colors and cycle(_as_list(colors)) or (
                 cycle([next(ohlc_colors)]) if is_overlay else colorgen())
 
+            # code added to provide an option to control line width
             line_widths = value._opts['line_width']
             if line_widths is None:
                 line_widths = [2] * max(len(value._opts['color']), 1)
@@ -565,7 +592,7 @@ return this.labels[index] || "";
                         fig.line(
                             'index', source_name, source=source,
                             legend_label=legend_label, line_color=color,
-                            line_width=line_width)
+                            line_width=line_width)  # the line_width parameter is set here
                 else:
                     if is_scatter:
                         r = fig.scatter(
@@ -576,7 +603,7 @@ return this.labels[index] || "";
                         r = fig.line(
                             'index', source_name, source=source,
                             legend_label=LegendStr(legend_label), line_color=color,
-                            line_width=1.3)
+                            line_width=line_width)  # the line_width parameter is set here
                     # Add dashed centerline just because
                     mean = float(pd.Series(arr).mean())
                     if not np.isnan(mean) and (abs(mean) < .1 or
@@ -613,6 +640,11 @@ return this.labels[index] || "";
         fig_volume = _plot_volume_section()
         figs_below_ohlc.append(fig_volume)
 
+    # controls the plotting of the Relative Volume segment based on the `plot` parameter `plot_rvol`
+    if plot_rvol:
+        fig_rvol = _plot_rvol_section()
+        # figs_below_ohlc.append(fig_rvol)
+
     if superimpose and is_datetime_index:
         _plot_superimposed_ohlc()
 
@@ -634,10 +666,45 @@ return this.labels[index] || "";
     if plot_volume:
         custom_js_args.update(volume_range=fig_volume.y_range)
 
+    """
+    This next piece of code provides y-axis auto-scaling for the Relative Volume segment, if plotted. This was 
+    constructed using a combination of reviewing the JS scripting used elsewhere in this code, and with guidance
+    from a StackOverflow reference:
+    https://stackoverflow.com/questions/72318379/how-to-dynamically-adjust-y-axis-zoom-in-bokeh
+    """
+    callback = CustomJS(args={'y_range': fig_rvol.y_range, 'source': source}, code='''
+
+            clearTimeout(window._autoscale_timeout);
+            var Index = source.data.index, rvol = source.data.RVOL, start = cb_obj.start, end = cb_obj.end, min = 0, max = -Infinity;
+
+            for (var i=0; i < Index.length; ++i) {
+                 if (start <= Index[i] && Index[i] <= end) {
+                     max = Math.max(rvol[i], max); min = Math.min(rvol[i], min);
+                 } 
+            } 
+
+            var pad = (max - min) * .09;
+            window._autoscale_timeout = setTimeout(function() {
+                 y_range.start = min - pad; y_range.end = max + pad; 
+            });
+
+            '''.replace('\n', '').replace('\t', '')
+                        )
+
+    if plot_rvol:
+        #     custom_js_args.update(rvol_range=fig_rvol.y_range)
+        fig_rvol.x_range.js_on_change('start', callback)
+        fig_rvol.x_range.js_on_change('end', callback)
+
     fig_ohlc.x_range.js_on_change('end', CustomJS(args=custom_js_args,  # type: ignore
                                                   code=_AUTOSCALE_JS_CALLBACK))
 
-    plots = figs_above_ohlc + [fig_ohlc] + figs_below_ohlc
+    # plots = figs_above_ohlc + [fig_ohlc] + figs_below_ohlc   # old code
+    if plot_rvol:  # new code for rvol positioned above the OHLC segment, if rvol plotted
+        plots = figs_above_ohlc + [fig_rvol] + [fig_ohlc] + figs_below_ohlc
+    else:
+        plots = figs_above_ohlc + [fig_ohlc] + figs_below_ohlc
+
     linked_crosshair = CrosshairTool(dimensions='both')
 
     for f in plots:
